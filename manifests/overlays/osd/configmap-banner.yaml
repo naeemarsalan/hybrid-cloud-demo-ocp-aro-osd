@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-banner
+  namespace: online-boutique
+data:
+  FRONTEND_MESSAGE: "☁️ Running on OSD / GCP / us-east1"
+  CLUSTER_NAME: "osd-gcp"
+  CLOUD_PROVIDER: "GCP"
+  REGION: "us-east1"
+  BANNER_COLOR: "#f4b400"

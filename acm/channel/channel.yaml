@@ -1,0 +1,12 @@
+apiVersion: apps.open-cluster-management.io/v1
+kind: Channel
+metadata:
+  name: hybrid-cloud-demo-git
+  namespace: online-boutique
+  labels:
+    app.kubernetes.io/part-of: online-boutique
+spec:
+  type: Git
+  pathname: https://github.com/naeemarsalan/hybrid-cloud-demo-ocp-aro-osd.git
+  secretRef:
+    name: git-credentials

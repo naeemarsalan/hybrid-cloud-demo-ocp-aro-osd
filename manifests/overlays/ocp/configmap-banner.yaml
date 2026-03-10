@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-banner
+  namespace: online-boutique
+data:
+  FRONTEND_MESSAGE: "☁️ Running on OCP / On-Prem / datacenter-1"
+  CLUSTER_NAME: "ocp-onprem"
+  CLOUD_PROVIDER: "On-Prem"
+  REGION: "datacenter-1"
+  BANNER_COLOR: "#cc0000"

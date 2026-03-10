@@ -1,0 +1,49 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: require-demo-labels
+  namespace: online-boutique
+  annotations:
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/standards: Hybrid Cloud Demo
+    policy.open-cluster-management.io/controls: CM-2 Baseline Configuration
+spec:
+  remediationAction: inform
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: check-demo-labels
+        spec:
+          remediationAction: inform
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: cluster.open-cluster-management.io/v1
+                kind: ManagedCluster
+                metadata:
+                  labels:
+                    environment: demo
+                    cloud: '{{ fromClusterClaim "cloud" }}'
+                status:
+                  conditions:
+                    - type: ManagedClusterConditionAvailable
+                      status: "True"
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: require-demo-labels-binding
+  namespace: online-boutique
+spec:
+  placementRef:
+    name: all-clusters-placement
+    kind: Placement
+    apiGroup: cluster.open-cluster-management.io
+  subjects:
+    - name: require-demo-labels
+      kind: Policy
+      apiGroup: policy.open-cluster-management.io

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# ============================================================
+# Hybrid Cloud Demo — Configuration TEMPLATE
+# ============================================================
+# Copy this to config.sh and fill in your values:
+#   cp config.sh.example config.sh
+#
+# config.sh is in .gitignore — it will NOT be committed.
+# ============================================================
+
+# --- ManagedCluster names (as registered in ACM) ---
+export OCP_CLUSTER_NAME="local-cluster"       # ACM hub / on-prem
+export ARO_CLUSTER_NAME="aro-east"             # ARO on Azure
+export OSD_CLUSTER_NAME="osd-gcp"              # OSD on GCP
+
+# --- API server URLs ---
+export OCP_API_URL=""                          # e.g. https://api.ocp.example.com:6443
+export ARO_API_URL=""                          # e.g. https://api.q27xwipo.eastus.aroapp.io:6443
+export OSD_API_URL=""                          # e.g. https://api.osd-demo.aynb.p2.openshiftapps.com:6443
+
+# --- Console URLs ---
+export OCP_CONSOLE_URL=""
+export ARO_CONSOLE_URL=""
+export OSD_CONSOLE_URL=""
+
+# --- GitHub repo (for ACM Channel) ---
+export GIT_REPO_URL="https://github.com/naeemarsalan/hybrid-cloud-demo-ocp-aro-osd.git"
+export GIT_BRANCH="main"
+
+# --- Namespace ---
+export APP_NAMESPACE="online-boutique"

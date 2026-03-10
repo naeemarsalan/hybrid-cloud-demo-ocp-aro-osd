@@ -1,0 +1,45 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: ensure-namespace
+  namespace: online-boutique
+  annotations:
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/standards: Hybrid Cloud Demo
+    policy.open-cluster-management.io/controls: CM-2 Baseline Configuration
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: ensure-online-boutique-ns
+        spec:
+          remediationAction: enforce
+          severity: low
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: online-boutique
+                  labels:
+                    app.kubernetes.io/part-of: online-boutique
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: ensure-namespace-binding
+  namespace: online-boutique
+spec:
+  placementRef:
+    name: all-clusters-placement
+    kind: Placement
+    apiGroup: cluster.open-cluster-management.io
+  subjects:
+    - name: ensure-namespace
+      kind: Policy
+      apiGroup: policy.open-cluster-management.io

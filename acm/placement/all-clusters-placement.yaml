@@ -1,0 +1,15 @@
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: all-clusters-placement
+  namespace: online-boutique
+  labels:
+    app.kubernetes.io/part-of: online-boutique
+spec:
+  clusterSets:
+    - hybrid-cloud-demo
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            environment: demo

@@ -1,0 +1,24 @@
+# Credentials — never commit
+scripts/config.sh
+acm/channel/git-secret.yaml
+osd/creds
+*.pem
+*.key
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+osd/ocm_linux_amd64.zip
+
+# Claude project files
+.claude/
+osd/.claude/
+.mcp.json

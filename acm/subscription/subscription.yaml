@@ -1,0 +1,18 @@
+apiVersion: apps.open-cluster-management.io/v1
+kind: Subscription
+metadata:
+  name: online-boutique
+  namespace: online-boutique
+  labels:
+    app.kubernetes.io/part-of: online-boutique
+  annotations:
+    apps.open-cluster-management.io/git-path: manifests/base
+    apps.open-cluster-management.io/git-branch: main
+    apps.open-cluster-management.io/reconcile-option: merge
+spec:
+  channel: online-boutique/hybrid-cloud-demo-git
+  placement:
+    placementRef:
+      name: cloud-placement
+      kind: Placement
+      apiGroup: cluster.open-cluster-management.io
