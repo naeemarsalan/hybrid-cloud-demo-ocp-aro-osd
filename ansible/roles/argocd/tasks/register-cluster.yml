@@ -1,0 +1,72 @@
+---
+- name: "{{ target_host }} — Set target cluster vars"
+  ansible.builtin.set_fact:
+    _target_cluster_name: "{{ hostvars[target_host].cluster_name }}"
+    _target_kubeconfig: "{{ hostvars[target_host].onprem_kubeconfig | default(hostvars[target_host].kubeconfig) }}"
+
+- name: "{{ target_host }} — Create argocd-manager ServiceAccount on target cluster"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ _target_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: argocd-manager
+        namespace: kube-system
+
+- name: "{{ target_host }} — Create ClusterRoleBinding for argocd-manager SA"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ _target_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: "argocd-manager-{{ _target_cluster_name }}"
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: cluster-admin
+      subjects:
+        - kind: ServiceAccount
+          name: argocd-manager
+          namespace: kube-system
+
+- name: "{{ target_host }} — Generate long-lived SA token"
+  ansible.builtin.command:
+    cmd: >-
+      oc --kubeconfig={{ _target_kubeconfig }}
+      create token argocd-manager -n kube-system
+      --duration={{ sa_token_duration }}
+  register: _argocd_sa_token
+  changed_when: false
+
+- name: "{{ target_host }} — Get target API URL"
+  ansible.builtin.command:
+    cmd: oc --kubeconfig={{ _target_kubeconfig }} whoami --show-server
+  register: _argocd_api_url
+  changed_when: false
+
+- name: "{{ target_host }} — Create ArgoCD cluster secret on hub"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "cluster-{{ _target_cluster_name }}"
+        namespace: openshift-gitops
+        labels:
+          argocd.argoproj.io/secret-type: cluster
+      type: Opaque
+      stringData:
+        name: "{{ _target_cluster_name }}"
+        server: "{{ _argocd_api_url.stdout }}"
+        config: |
+          {"bearerToken": "{{ _argocd_sa_token.stdout }}", "tlsClientConfig": {"insecure": true}}
+
+- name: "{{ target_host }} — Cluster {{ _target_cluster_name }} registered with ArgoCD"
+  ansible.builtin.debug:
+    msg: "Registered cluster {{ _target_cluster_name }} ({{ _argocd_api_url.stdout }}) in openshift-gitops."

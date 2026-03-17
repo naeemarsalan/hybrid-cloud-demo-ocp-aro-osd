@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transaction-service
+  namespace: hybridbank
+  labels:
+    app: transaction-service
+    app.kubernetes.io/part-of: hybridbank
+    tier: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transaction-service
+  template:
+    metadata:
+      labels:
+        app: transaction-service
+        app.kubernetes.io/part-of: hybridbank
+        tier: backend
+    spec:
+      containers:
+        - name: transaction-service
+          image: docker.io/naeemarsalan/hybridbank-transaction-service:latest
+          ports:
+            - containerPort: 3003
+          env:
+            - name: CORE_DB_HOST
+              value: postgres-core
+            - name: CORE_DB_PORT
+              value: "5432"
+            - name: CORE_DB_USER
+              value: hybridbank
+            - name: CORE_DB_PASSWORD
+              value: hybridbank
+            - name: CORE_DB_NAME
+              value: hybridbank_core
+            - name: ARCHIVE_DB_HOST
+              value: postgres-archive
+            - name: ARCHIVE_DB_PORT
+              value: "5432"
+            - name: ARCHIVE_DB_USER
+              value: hybridbank
+            - name: ARCHIVE_DB_PASSWORD
+              value: hybridbank
+            - name: ARCHIVE_DB_NAME
+              value: hybridbank_archive
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service:3002
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3003
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3003
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction-service
+  namespace: hybridbank
+  labels:
+    app: transaction-service
+    app.kubernetes.io/part-of: hybridbank
+spec:
+  selector:
+    app: transaction-service
+  ports:
+    - port: 3003
+      targetPort: 3003
+  type: ClusterIP

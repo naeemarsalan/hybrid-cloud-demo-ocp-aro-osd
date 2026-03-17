@@ -1,0 +1,96 @@
+---
+- name: Set KUBECONFIG for hub
+  ansible.builtin.set_fact:
+    k8s_kubeconfig: "{{ kubeconfig }}"
+
+- name: Create ACM namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ acm_namespace }}"
+
+- name: Create OperatorGroup
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: operators.coreos.com/v1
+      kind: OperatorGroup
+      metadata:
+        name: acm-operator-group
+        namespace: "{{ acm_namespace }}"
+      spec:
+        targetNamespaces:
+          - "{{ acm_namespace }}"
+
+- name: Create ACM Subscription
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: Subscription
+      metadata:
+        name: advanced-cluster-management
+        namespace: "{{ acm_namespace }}"
+      spec:
+        channel: "{{ acm_channel }}"
+        installPlanApproval: Automatic
+        name: advanced-cluster-management
+        source: redhat-operators
+        sourceNamespace: openshift-marketplace
+
+- name: Wait for ACM CSV to succeed
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    namespace: "{{ acm_namespace }}"
+    label_selectors:
+      - "operators.coreos.com/advanced-cluster-management.open-cluster-management="
+  register: acm_csv
+  until: >-
+    acm_csv.resources | length > 0 and
+    acm_csv.resources[0].status.phase | default('') == 'Succeeded'
+  retries: 60
+  delay: 10
+
+- name: Create MultiClusterHub
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: operator.open-cluster-management.io/v1
+      kind: MultiClusterHub
+      metadata:
+        name: "{{ mch_name }}"
+        namespace: "{{ acm_namespace }}"
+      spec: {}
+
+- name: Wait for MultiClusterHub to be Running
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    api_version: operator.open-cluster-management.io/v1
+    kind: MultiClusterHub
+    name: "{{ mch_name }}"
+    namespace: "{{ acm_namespace }}"
+  register: mch_status
+  until: >-
+    mch_status.resources | length > 0 and
+    mch_status.resources[0].status.phase | default('') == 'Running'
+  retries: 120
+  delay: 15
+
+- name: Create ManagedClusterSet
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: cluster.open-cluster-management.io/v1beta2
+      kind: ManagedClusterSet
+      metadata:
+        name: "{{ clusterset_name }}"

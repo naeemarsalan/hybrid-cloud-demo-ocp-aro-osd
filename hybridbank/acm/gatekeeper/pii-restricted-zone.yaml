@@ -1,0 +1,90 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: gatekeeper-pii-constraint
+  namespace: hybridbank
+  annotations:
+    policy.open-cluster-management.io/categories: SC System and Communications Protection
+    policy.open-cluster-management.io/standards: Hybrid Cloud Demo
+    policy.open-cluster-management.io/controls: SC-28 Protection of Information at Rest
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: pii-constraint-template
+        spec:
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: templates.gatekeeper.sh/v1
+                kind: ConstraintTemplate
+                metadata:
+                  name: piirestrictedzone
+                spec:
+                  crd:
+                    spec:
+                      names:
+                        kind: PiiRestrictedZone
+                  targets:
+                    - target: admission.k8s.gatekeeper.sh
+                      rego: |
+                        package piirestrictedzone
+                        violation[{"msg": msg}] {
+                          input.review.object.kind == "Deployment"
+                          input.review.object.metadata.labels["data-sensitivity"] == "pii"
+                          not data.inventory.namespace["hybridbank"]["v1"]["ConfigMap"]["cluster-metadata"].data["data-zone"] == "restricted"
+                          msg := "PII-labeled deployments are only allowed on clusters with data-zone=restricted"
+                        }
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: pii-constraint
+        spec:
+          remediationAction: enforce
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: constraints.gatekeeper.sh/v1beta1
+                kind: PiiRestrictedZone
+                metadata:
+                  name: pii-restricted-zone
+                spec:
+                  match:
+                    kinds:
+                      - apiGroups: ["apps"]
+                        kinds: ["Deployment"]
+                    namespaces: ["hybridbank"]
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: gatekeeper-pii-placement
+  namespace: hybridbank
+spec:
+  clusterSets:
+    - hybrid-cloud-demo
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            environment: demo
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: gatekeeper-pii-binding
+  namespace: hybridbank
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: gatekeeper-pii-placement
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: gatekeeper-pii-constraint

@@ -1,0 +1,51 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: hybridbank-cloud
+  namespace: openshift-gitops
+spec:
+  generators:
+    - clusterDecisionResource:
+        configMapRef: acm-placement
+        labelSelector:
+          matchLabels:
+            cluster.open-cluster-management.io/placement: hybridbank-cloud
+        requeueAfterSeconds: 180
+  template:
+    metadata:
+      name: hybridbank-cloud-{{name}}
+      labels:
+        velero.io/exclude-from-backup: "true"
+        app.kubernetes.io/part-of: hybridbank
+    spec:
+      project: default
+      sources:
+        - repoURL: https://github.com/naeemarsalan/hybrid-cloud-demo-ocp-aro-osd.git
+          targetRevision: main
+          path: hybridbank/manifests/cloud
+      destination:
+        namespace: hybridbank
+        server: "{{server}}"
+      syncPolicy:
+        automated:
+          selfHeal: true
+          prune: true
+        syncOptions:
+          - CreateNamespace=true
+          - PruneLast=true
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: hybridbank-cloud
+  namespace: openshift-gitops
+spec:
+  numberOfClusters: 1
+  clusterSets:
+    - hybrid-cloud-demo
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            cloud: azure
+            environment: demo

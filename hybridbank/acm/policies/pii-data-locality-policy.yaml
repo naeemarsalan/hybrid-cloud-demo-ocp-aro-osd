@@ -1,0 +1,65 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: pii-data-locality
+  namespace: hybridbank
+  annotations:
+    policy.open-cluster-management.io/categories: SC System and Communications Protection
+    policy.open-cluster-management.io/standards: Hybrid Cloud Demo
+    policy.open-cluster-management.io/controls: SC-28 Protection of Information at Rest
+spec:
+  remediationAction: inform
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: pii-workloads-not-allowed
+        spec:
+          remediationAction: inform
+          severity: high
+          namespaceSelector:
+            include:
+              - hybridbank
+          object-templates:
+            - complianceType: mustnothave
+              objectDefinition:
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  labels:
+                    data-sensitivity: pii
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: unrestricted-clusters-placement
+  namespace: hybridbank
+spec:
+  clusterSets:
+    - hybrid-cloud-demo
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            environment: demo
+          matchExpressions:
+            - key: data-zone
+              operator: NotIn
+              values:
+                - restricted
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: pii-data-locality-binding
+  namespace: hybridbank
+placementRef:
+  name: unrestricted-clusters-placement
+  kind: Placement
+  apiGroup: cluster.open-cluster-management.io
+subjects:
+  - name: pii-data-locality
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io

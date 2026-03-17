@@ -1,0 +1,6 @@
+---
+- name: ACM Import — Register Managed Clusters with Hub
+  hosts: hub
+  gather_facts: false
+  roles:
+    - acm-import

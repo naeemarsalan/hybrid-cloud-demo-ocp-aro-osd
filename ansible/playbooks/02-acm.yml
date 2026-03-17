@@ -1,0 +1,6 @@
+---
+- name: ACM — Install Advanced Cluster Management on Hub
+  hosts: hub
+  gather_facts: false
+  roles:
+    - acm

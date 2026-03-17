@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres-sa
+  namespace: hybridbank
+  labels:
+    app.kubernetes.io/part-of: hybridbank
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hybridbank-postgres-anyuid
+  labels:
+    app.kubernetes.io/part-of: hybridbank
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+  - kind: ServiceAccount
+    name: postgres-sa
+    namespace: hybridbank

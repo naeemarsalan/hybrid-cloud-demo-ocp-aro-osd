@@ -1,0 +1,10 @@
+---
+- name: Set KUBECONFIG for hub
+  ansible.builtin.set_fact:
+    k8s_kubeconfig: "{{ kubeconfig }}"
+
+- name: Import managed clusters
+  ansible.builtin.include_tasks: import-cluster.yml
+  loop: "{{ groups['managed'] }}"
+  loop_control:
+    loop_var: managed_host

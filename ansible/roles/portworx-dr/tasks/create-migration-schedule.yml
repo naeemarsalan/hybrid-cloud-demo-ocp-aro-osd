@@ -1,0 +1,34 @@
+---
+- name: "{{ dest_host }} — Set destination vars"
+  ansible.builtin.set_fact:
+    _dest_cluster_name: "{{ hostvars[dest_host].cluster_name }}"
+
+- name: "{{ dest_host }} — Determine migration schedule name"
+  ansible.builtin.set_fact:
+    _migration_name: >-
+      {{ 'hybridbank-core-migration' if dest_host == 'aro' else 'hybridbank-core-migration-' + dest_host }}
+
+- name: "{{ dest_host }} — Create MigrationSchedule"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: stork.libopenstorage.org/v1alpha1
+      kind: MigrationSchedule
+      metadata:
+        name: "{{ _migration_name | trim }}"
+        namespace: "{{ app_namespace }}"
+        labels:
+          app.kubernetes.io/part-of: hybridbank
+      spec:
+        template:
+          spec:
+            clusterPair: "{{ _dest_cluster_name }}"
+            includeResources: false
+            includeVolumes: true
+            startApplications: false
+            namespaces:
+              - "{{ app_namespace }}"
+            selectors:
+              app: postgres-core
+        schedulePolicyName: hybridbank-schedule

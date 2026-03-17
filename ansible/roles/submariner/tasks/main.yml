@@ -1,0 +1,23 @@
+---
+- name: Set KUBECONFIG for hub
+  ansible.builtin.set_fact:
+    k8s_kubeconfig: "{{ kubeconfig }}"
+
+- name: Create SubmarinerConfig and ManagedClusterAddon per managed cluster
+  ansible.builtin.include_tasks: setup-submariner.yml
+  loop: "{{ groups['managed'] + ['onprem'] }}"
+  loop_control:
+    loop_var: managed_host
+
+- name: Setup Azure LB rules for Submariner on Azure clusters
+  ansible.builtin.include_tasks: setup-azure-lb.yml
+  loop: "{{ groups['managed'] }}"
+  loop_control:
+    loop_var: managed_host
+  when: hostvars[managed_host].cloud | default('') == 'azure'
+
+- name: Verify cross-cluster connectivity
+  ansible.builtin.include_tasks: verify-connectivity.yml
+  loop: "{{ groups['managed'] + ['onprem'] }}"
+  loop_control:
+    loop_var: managed_host

@@ -1,0 +1,41 @@
+# =============================================================================
+# Azure Credentials
+# Source: az_creds/ directory or `az ad sp create-for-rbac`
+# =============================================================================
+azure_subscription_id = "your-azure-subscription-id"
+azure_client_id       = "your-service-principal-app-id"
+azure_client_secret   = "your-service-principal-password"
+azure_tenant_id       = "your-azure-tenant-id"
+
+# Azure infrastructure (defaults match the demo environment)
+# azure_resource_group = "openenv-fzm26"
+# azure_location       = "eastus"
+# azure_vnet_name      = "aro-vnet"
+# azure_vpn_sku        = "VpnGw1"
+
+# =============================================================================
+# GCP Credentials
+# Source: osd/sa.json (service account key)
+# =============================================================================
+# gcp_project_id       = "openenv-j4tbl"
+# gcp_credentials_file = "../../osd/sa.json"
+# gcp_region           = "us-east1"
+# gcp_network_name     = "osd-demo-z2vzk-network"
+
+# =============================================================================
+# On-Prem VPN (enable when on-prem endpoint is ready)
+# =============================================================================
+# enable_onprem_vpn = true
+# onprem_public_ip  = "203.0.113.1"
+# onprem_cidr_ranges = ["192.168.0.0/16"]
+
+# =============================================================================
+# Shared
+# =============================================================================
+shared_secret = "change-me-to-a-strong-random-string"
+
+# tags = {
+#   project     = "hybrid-cloud-demo"
+#   managed-by  = "terraform"
+#   environment = "demo"
+# }

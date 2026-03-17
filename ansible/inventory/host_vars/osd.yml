@@ -1,0 +1,4 @@
+# GCP service account credentials for Portworx on OSD
+# Set via environment variable or create a local osd-secrets.yml
+# Export the full SA JSON as: export GCP_SA_JSON='{"type": "service_account", ...}'
+gcp_sa_json: "{{ lookup('env', 'GCP_SA_JSON') | default('CHANGEME', true) }}"

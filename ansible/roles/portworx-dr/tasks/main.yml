@@ -1,0 +1,55 @@
+---
+- name: Set KUBECONFIG for on-prem (Stork source cluster)
+  ansible.builtin.set_fact:
+    k8s_kubeconfig: "{{ onprem_kubeconfig | default(kubeconfig) }}"
+
+# --- Objectstore credentials (required for ClusterPair storage status) ---
+
+- name: Setup objectstore credentials on source (on-prem) cluster
+  ansible.builtin.include_tasks: setup-objectstore.yml
+  vars:
+    _objectstore_kubeconfig: "{{ k8s_kubeconfig }}"
+    _objectstore_cluster: "onprem"
+
+- name: Setup objectstore credentials on each destination cluster
+  ansible.builtin.include_tasks: setup-objectstore.yml
+  loop: "{{ groups['managed'] }}"
+  loop_control:
+    loop_var: _obj_dest_host
+  vars:
+    _objectstore_kubeconfig: "{{ hostvars[_obj_dest_host].kubeconfig }}"
+    _objectstore_cluster: "{{ hostvars[_obj_dest_host].cluster_name }}"
+
+# --- ClusterPair and migration setup ---
+
+- name: Setup SA tokens and ClusterPairs for each destination cluster
+  ansible.builtin.include_tasks: setup-destination.yml
+  loop: "{{ groups['managed'] }}"
+  loop_control:
+    loop_var: dest_host
+
+- name: Apply SchedulePolicy on source cluster
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: stork.libopenstorage.org/v1alpha1
+      kind: SchedulePolicy
+      metadata:
+        name: hybridbank-schedule
+        namespace: "{{ app_namespace }}"
+        labels:
+          app.kubernetes.io/part-of: hybridbank
+      policy:
+        interval:
+          intervalMinutes: "{{ migration_schedule_interval }}"
+          retain: "{{ migration_schedule_retain }}"
+        daily:
+          time: "2:00am"
+          retain: 7
+
+- name: Create MigrationSchedules on source cluster
+  ansible.builtin.include_tasks: create-migration-schedule.yml
+  loop: "{{ groups['managed'] }}"
+  loop_control:
+    loop_var: dest_host

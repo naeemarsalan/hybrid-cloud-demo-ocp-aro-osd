@@ -1,0 +1,25 @@
+# Common variables across all clusters
+ansible_connection: local
+
+app_namespace: hybridbank
+clusterset_name: hybrid-cloud-demo
+px_namespace: portworx
+px_version: "3.5.2.1"
+
+# Git repo for ArgoCD
+git_repo_url: https://github.com/naeemarsalan/hybrid-cloud-demo-ocp-aro-osd.git
+git_branch: main
+
+# Stork migration settings
+migration_schedule_interval: 1
+migration_schedule_retain: 4
+
+# SA token duration for long-lived cluster pair auth
+sa_token_duration: "8760h"
+
+# PX objectstore credentials (Azure Blob) for cluster pairing
+# Set these via environment variables or ansible-vault:
+#   export PX_OBJECTSTORE_ACCOUNT=your_storage_account
+#   export PX_OBJECTSTORE_KEY=your_storage_key
+px_objectstore_account: "{{ lookup('env', 'PX_OBJECTSTORE_ACCOUNT') | default('CHANGEME', true) }}"
+px_objectstore_key: "{{ lookup('env', 'PX_OBJECTSTORE_KEY') | default('CHANGEME', true) }}"

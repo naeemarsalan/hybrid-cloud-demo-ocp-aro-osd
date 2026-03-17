@@ -1,0 +1,32 @@
+# =============================================================================
+# Azure / ARO
+# =============================================================================
+azure_subscription_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+azure_use_cli         = true
+# azure_client_id     = ""   # Only needed if azure_use_cli = false
+# azure_client_secret = ""
+# azure_tenant_id     = ""
+
+aro_cluster_name   = "aro-east"
+aro_location       = "eastus"
+aro_master_vm_size = "Standard_D8s_v3"
+aro_worker_vm_size = "Standard_D4s_v3"
+aro_worker_count   = 3
+pull_secret_path   = "~/pull-secret.json"
+
+# =============================================================================
+# GCP / OSD
+# =============================================================================
+gcp_project_id       = "my-gcp-project"
+gcp_credentials_file = "~/gcp-sa.json"
+gcp_region           = "us-east1"
+
+osd_cluster_name = "osd-gcp"
+osd_machine_type = "custom-4-16384"
+osd_compute_nodes = 3
+ocm_token         = "eyJhbGci..."
+
+# =============================================================================
+# On-Prem
+# =============================================================================
+onprem_kubeconfig = "/tmp/kubeconfig-onprem.yaml"

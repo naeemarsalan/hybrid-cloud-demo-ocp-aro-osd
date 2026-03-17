@@ -1,0 +1,197 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-db
+  namespace: hybridbank
+  labels:
+    app.kubernetes.io/part-of: hybridbank
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: init-db
+        app.kubernetes.io/part-of: hybridbank
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-postgres-core
+          image: postgres:15-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres-core -U hybridbank; do
+                echo "Waiting for postgres-core..."
+                sleep 2
+              done
+        - name: wait-for-postgres-archive
+          image: postgres:15-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres-archive -U hybridbank; do
+                echo "Waiting for postgres-archive..."
+                sleep 2
+              done
+      containers:
+        - name: init-db
+          image: postgres:15-alpine
+          env:
+            - name: PGPASSWORD
+              value: hybridbank
+          command:
+            - sh
+            - -c
+            - |
+              echo "=== Initializing hybridbank_core on postgres-core ==="
+              # Check if already initialized
+              EXISTING=$(psql -h postgres-core -U hybridbank -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='hybridbank_core'" 2>/dev/null || true)
+              if [ "$EXISTING" = "1" ]; then
+                echo "hybridbank_core already exists, checking for tables..."
+                TABLE_COUNT=$(psql -h postgres-core -U hybridbank -d hybridbank_core -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" 2>/dev/null || echo "0")
+                if [ "$TABLE_COUNT" -gt "0" ]; then
+                  echo "Tables already exist ($TABLE_COUNT tables), skipping core init."
+                else
+                  echo "Database exists but no tables, running core schema..."
+                  psql -h postgres-core -U hybridbank -d hybridbank_core -f /init/init-core.sql
+                fi
+              else
+                echo "Creating hybridbank_core database..."
+                psql -h postgres-core -U hybridbank -d postgres -c "CREATE DATABASE hybridbank_core;"
+                psql -h postgres-core -U hybridbank -d hybridbank_core -f /init/init-core.sql
+              fi
+
+              echo "=== Initializing hybridbank_archive on postgres-archive ==="
+              EXISTING=$(psql -h postgres-archive -U hybridbank -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='hybridbank_archive'" 2>/dev/null || true)
+              if [ "$EXISTING" = "1" ]; then
+                TABLE_COUNT=$(psql -h postgres-archive -U hybridbank -d hybridbank_archive -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" 2>/dev/null || echo "0")
+                if [ "$TABLE_COUNT" -gt "0" ]; then
+                  echo "Tables already exist ($TABLE_COUNT tables), skipping archive init."
+                else
+                  psql -h postgres-archive -U hybridbank -d hybridbank_archive -f /init/init-archive.sql
+                fi
+              else
+                psql -h postgres-archive -U hybridbank -d postgres -c "CREATE DATABASE hybridbank_archive;"
+                psql -h postgres-archive -U hybridbank -d hybridbank_archive -f /init/init-archive.sql
+              fi
+
+              echo "=== Database initialization complete ==="
+          volumeMounts:
+            - name: init-scripts
+              mountPath: /init
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: init-db-scripts
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: init-db-scripts
+  namespace: hybridbank
+  labels:
+    app.kubernetes.io/part-of: hybridbank
+data:
+  init-core.sql: |
+    CREATE TABLE IF NOT EXISTS accounts (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        account_number VARCHAR(20) NOT NULL UNIQUE,
+        masked_number VARCHAR(10) NOT NULL,
+        balance NUMERIC(12,2) NOT NULL DEFAULT 0,
+        type VARCHAR(20) NOT NULL CHECK (type IN ('checking', 'savings')),
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS transactions (
+        id SERIAL PRIMARY KEY,
+        account_id INTEGER REFERENCES accounts(id),
+        date DATE NOT NULL DEFAULT CURRENT_DATE,
+        description VARCHAR(255) NOT NULL,
+        category VARCHAR(50) NOT NULL,
+        amount NUMERIC(12,2) NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'pending', 'failed')),
+        type VARCHAR(10) NOT NULL CHECK (type IN ('credit', 'debit')),
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    INSERT INTO accounts (id, name, account_number, masked_number, balance, type) VALUES
+        (1, 'Checking Account', '12344521', '****4521', 12458.32, 'checking'),
+        (2, 'Savings Account', '12348834', '****8834', 45200.00, 'savings')
+    ON CONFLICT (id) DO NOTHING;
+
+    SELECT setval('accounts_id_seq', 2);
+
+    INSERT INTO transactions (account_id, date, description, category, amount, status, type) VALUES
+        (1, CURRENT_DATE, 'Salary Deposit', 'Salary', 5200.00, 'completed', 'credit'),
+        (1, CURRENT_DATE - 1, 'Whole Foods Market', 'Groceries', -127.84, 'completed', 'debit'),
+        (1, CURRENT_DATE - 2, 'Monthly Rent Payment', 'Rent', -2100.00, 'completed', 'debit'),
+        (1, CURRENT_DATE - 3, 'Transfer to Savings', 'Transfer', -500.00, 'completed', 'debit'),
+        (2, CURRENT_DATE - 3, 'Transfer from Checking', 'Transfer', 500.00, 'completed', 'credit'),
+        (1, CURRENT_DATE - 4, 'Electric Company', 'Utilities', -145.32, 'completed', 'debit'),
+        (1, CURRENT_DATE - 5, 'The Italian Place', 'Dining', -85.50, 'completed', 'debit'),
+        (1, CURRENT_DATE - 6, 'Coffee Shop', 'Dining', -12.75, 'pending', 'debit'),
+        (1, CURRENT_DATE - 7, 'Amazon Purchase', 'Shopping', -67.99, 'completed', 'debit'),
+        (1, CURRENT_DATE - 8, 'Refund - Electronics Store', 'Shopping', 299.99, 'completed', 'credit'),
+        (1, CURRENT_DATE - 9, 'Gas Station', 'Transportation', -52.00, 'failed', 'debit'),
+        (1, CURRENT_DATE - 10, 'Freelance Payment', 'Salary', 1500.00, 'completed', 'credit'),
+        (1, CURRENT_DATE - 11, 'Internet Service', 'Utilities', -79.99, 'completed', 'debit'),
+        (1, CURRENT_DATE - 12, 'Grocery Store', 'Groceries', -156.42, 'completed', 'debit'),
+        (1, CURRENT_DATE - 13, 'Transfer from Savings', 'Transfer', 1000.00, 'completed', 'credit'),
+        (2, CURRENT_DATE - 13, 'Transfer to Checking', 'Transfer', -1000.00, 'completed', 'debit'),
+        (1, CURRENT_DATE - 14, 'Restaurant', 'Dining', -145.20, 'completed', 'debit'),
+        (1, CURRENT_DATE - 15, 'Phone Bill', 'Utilities', -65.00, 'completed', 'debit'),
+        (1, CURRENT_DATE - 16, 'Gym Membership', 'Health', -45.00, 'completed', 'debit'),
+        (1, CURRENT_DATE - 17, 'Online Shopping', 'Shopping', -234.56, 'completed', 'debit'),
+        (1, CURRENT_DATE - 18, 'Insurance Payment', 'Insurance', -175.00, 'completed', 'debit'),
+        (2, CURRENT_DATE - 19, 'Dividend Payment', 'Investment', 87.50, 'completed', 'credit'),
+        (1, CURRENT_DATE - 20, 'Supermarket', 'Groceries', -98.32, 'completed', 'debit'),
+        (1, CURRENT_DATE - 21, 'Gas Station', 'Transportation', -45.00, 'completed', 'debit'),
+        (1, CURRENT_DATE - 22, 'Pharmacy', 'Health', -34.99, 'completed', 'debit'),
+        (1, CURRENT_DATE - 23, 'Movie Tickets', 'Entertainment', -42.00, 'completed', 'debit'),
+        (1, CURRENT_DATE - 24, 'Book Store', 'Shopping', -56.78, 'completed', 'debit'),
+        (1, CURRENT_DATE - 25, 'Salary Deposit', 'Salary', 5200.00, 'completed', 'credit'),
+        (1, CURRENT_DATE - 26, 'Restaurant - Valentine', 'Dining', -198.50, 'completed', 'debit'),
+        (1, CURRENT_DATE - 27, 'Streaming Service', 'Entertainment', -15.99, 'completed', 'debit'),
+        (1, CURRENT_DATE - 28, 'Hardware Store', 'Shopping', -123.45, 'completed', 'debit'),
+        (1, CURRENT_DATE - 29, 'Transfer to Savings', 'Transfer', -750.00, 'completed', 'debit'),
+        (2, CURRENT_DATE - 29, 'Transfer from Checking', 'Transfer', 750.00, 'completed', 'credit');
+
+  init-archive.sql: |
+    CREATE TABLE IF NOT EXISTS accounts_pii (
+        account_id INTEGER PRIMARY KEY,
+        ssn_last4 VARCHAR(4),
+        kyc_status VARCHAR(20) DEFAULT 'verified' CHECK (kyc_status IN ('verified', 'pending', 'failed')),
+        address TEXT,
+        phone VARCHAR(20),
+        email VARCHAR(100)
+    );
+
+    CREATE TABLE IF NOT EXISTS transactions_archive (
+        id SERIAL PRIMARY KEY,
+        account_id INTEGER NOT NULL,
+        date DATE NOT NULL,
+        description VARCHAR(255) NOT NULL,
+        category VARCHAR(50) NOT NULL,
+        amount NUMERIC(12,2) NOT NULL,
+        status VARCHAR(20) NOT NULL,
+        type VARCHAR(10) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id SERIAL PRIMARY KEY,
+        action VARCHAR(50) NOT NULL,
+        entity_type VARCHAR(50) NOT NULL,
+        entity_id INTEGER,
+        details JSONB,
+        performed_at TIMESTAMP DEFAULT NOW()
+    );
+
+    INSERT INTO accounts_pii (account_id, ssn_last4, kyc_status, address, phone, email) VALUES
+        (1, '4521', 'verified', '123 Main St, New York, NY 10001', '555-0101', 'customer@hybridbank.com'),
+        (2, '8834', 'verified', '123 Main St, New York, NY 10001', '555-0101', 'customer@hybridbank.com')
+    ON CONFLICT (account_id) DO NOTHING;

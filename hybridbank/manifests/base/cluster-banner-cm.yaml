@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-banner
+  namespace: hybridbank
+  labels:
+    app.kubernetes.io/part-of: hybridbank
+data:
+  CLUSTER_NAME: "unknown"
+  CLUSTER_CLOUD: "unknown"
+  CLUSTER_ROLE: "unknown"
