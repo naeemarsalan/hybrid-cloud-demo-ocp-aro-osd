@@ -1,4 +1,5 @@
 # Credentials — never commit
+creds
 scripts/config.sh
 acm/channel/git-secret.yaml
 osd/creds
