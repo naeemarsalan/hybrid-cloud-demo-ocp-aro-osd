@@ -1,0 +1,21 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: phoenix-burst-scaler
+  namespace: phoenix
+  labels:
+    app: phoenix
+    app.kubernetes.io/part-of: phoenix
+spec:
+  scaleTargetRef:
+    name: phoenix
+  pollingInterval: 15
+  cooldownPeriod: 120
+  minReplicaCount: 0
+  maxReplicaCount: 3
+  triggers:
+    - type: metrics-api
+      metadata:
+        targetValue: "5"
+        url: "http://metrics-proxy.phoenix.svc:8080/"
+        valueLocation: "request_rate"

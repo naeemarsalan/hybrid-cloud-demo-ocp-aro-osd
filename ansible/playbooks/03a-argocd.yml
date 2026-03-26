@@ -1,0 +1,6 @@
+---
+- name: ArgoCD — GitOps Application Deployment
+  hosts: hub
+  gather_facts: false
+  roles:
+    - argocd

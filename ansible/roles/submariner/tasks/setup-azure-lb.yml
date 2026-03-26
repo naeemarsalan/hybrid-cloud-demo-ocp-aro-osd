@@ -1,0 +1,168 @@
+---
+# Setup Azure Load Balancer rules for Submariner UDP traffic on ARO clusters.
+# Required because the ARO public IP is fronted by an Azure LB, and UDP
+# traffic for IPsec NAT-T (4500) and NAT discovery (4490) must be explicitly
+# forwarded to the gateway node.
+#
+# Expected variables (from inventory):
+#   managed_host            — host key in inventory
+#   hostvars[managed_host]  — must contain azure_resource_group, azure_lb_name,
+#                             azure_lb_frontend_ip, azure_nsg_name
+
+- name: "{{ managed_host }} — Set Azure vars"
+  ansible.builtin.set_fact:
+    _azure_rg: "{{ hostvars[managed_host].azure_resource_group }}"
+    _azure_lb: "{{ hostvars[managed_host].azure_lb_name }}"
+    _azure_frontend: "{{ hostvars[managed_host].azure_lb_frontend_ip }}"
+    _azure_nsg: "{{ hostvars[managed_host].azure_nsg_name }}"
+    _cluster_kubeconfig: "{{ hostvars[managed_host].kubeconfig }}"
+
+# --- NSG rules (idempotent — az CLI skips if rule already exists with same config) ---
+
+- name: "{{ managed_host }} — Ensure NSG rule for UDP 4500 (IPsec NAT-T)"
+  ansible.builtin.command:
+    cmd: >-
+      az network nsg rule create
+      --nsg-name {{ _azure_nsg }}
+      --resource-group {{ _azure_rg }}
+      --name submariner-ipsec-natt
+      --priority 220
+      --direction Inbound
+      --access Allow
+      --protocol Udp
+      --destination-port-ranges 4500
+      --source-address-prefixes '*'
+      -o none
+  register: _nsg_natt
+  changed_when: "'already exists' not in _nsg_natt.stderr"
+  failed_when: _nsg_natt.rc != 0 and 'already exists' not in _nsg_natt.stderr
+
+- name: "{{ managed_host }} — Ensure NSG rule for UDP 4490 (NAT discovery)"
+  ansible.builtin.command:
+    cmd: >-
+      az network nsg rule create
+      --nsg-name {{ _azure_nsg }}
+      --resource-group {{ _azure_rg }}
+      --name submariner-natdiscovery
+      --priority 221
+      --direction Inbound
+      --access Allow
+      --protocol Udp
+      --destination-port-ranges 4490
+      --source-address-prefixes '*'
+      -o none
+  register: _nsg_natdisc
+  changed_when: "'already exists' not in _nsg_natdisc.stderr"
+  failed_when: _nsg_natdisc.rc != 0 and 'already exists' not in _nsg_natdisc.stderr
+
+# --- Identify the Submariner gateway node ---
+
+- name: "{{ managed_host }} — Wait for Submariner gateway pod"
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ _cluster_kubeconfig }}"
+    api_version: v1
+    kind: Pod
+    namespace: submariner-operator
+    label_selectors:
+      - "app=submariner-gateway"
+  register: _gw_pods
+  until: >-
+    _gw_pods.resources | length > 0 and
+    _gw_pods.resources | map(attribute='status.phase') | select('equalto', 'Running') | list | length > 0
+  retries: 60
+  delay: 10
+
+- name: "{{ managed_host }} — Get gateway node name"
+  ansible.builtin.set_fact:
+    _gw_node: "{{ _gw_pods.resources[0].spec.nodeName }}"
+
+# --- Create gateway-specific backend pool ---
+
+- name: "{{ managed_host }} — Create Submariner gateway backend pool"
+  ansible.builtin.command:
+    cmd: >-
+      az network lb address-pool create
+      --lb-name {{ _azure_lb }}
+      --resource-group {{ _azure_rg }}
+      --name submariner-gateway
+      -o none
+  register: _pool_create
+  changed_when: "'already exists' not in _pool_create.stderr"
+  failed_when: _pool_create.rc != 0 and 'already exists' not in _pool_create.stderr
+
+- name: "{{ managed_host }} — Add gateway node NIC to backend pool"
+  ansible.builtin.command:
+    cmd: >-
+      az network nic ip-config address-pool add
+      --nic-name {{ _gw_node }}-nic
+      --resource-group {{ _azure_rg }}
+      --ip-config-name pipConfig
+      --lb-name {{ _azure_lb }}
+      --address-pool submariner-gateway
+      -o none
+  register: _nic_add
+  changed_when: "'already exists' not in _nic_add.stderr"
+  failed_when: _nic_add.rc != 0 and 'already exists' not in _nic_add.stderr
+
+# --- Health probe (kubelet port — always running on gateway node) ---
+
+- name: "{{ managed_host }} — Create health probe for Submariner gateway"
+  ansible.builtin.command:
+    cmd: >-
+      az network lb probe create
+      --lb-name {{ _azure_lb }}
+      --resource-group {{ _azure_rg }}
+      --name submariner-gateway-probe
+      --port 10250
+      --protocol Tcp
+      -o none
+  register: _probe_create
+  changed_when: "'already exists' not in _probe_create.stderr"
+  failed_when: _probe_create.rc != 0 and 'already exists' not in _probe_create.stderr
+
+# --- LB rules for UDP 4500 and 4490 ---
+
+- name: "{{ managed_host }} — Create LB rule for UDP 4500 (IPsec NAT-T)"
+  ansible.builtin.command:
+    cmd: >-
+      az network lb rule create
+      --lb-name {{ _azure_lb }}
+      --resource-group {{ _azure_rg }}
+      --name submariner-natt
+      --frontend-ip-name {{ _azure_frontend }}
+      --backend-pool-name submariner-gateway
+      --protocol Udp
+      --frontend-port 4500
+      --backend-port 4500
+      --probe-name submariner-gateway-probe
+      --disable-outbound-snat true
+      -o none
+  register: _lb_natt
+  changed_when: "'already exists' not in _lb_natt.stderr"
+  failed_when: _lb_natt.rc != 0 and 'already exists' not in _lb_natt.stderr
+
+- name: "{{ managed_host }} — Create LB rule for UDP 4490 (NAT discovery)"
+  ansible.builtin.command:
+    cmd: >-
+      az network lb rule create
+      --lb-name {{ _azure_lb }}
+      --resource-group {{ _azure_rg }}
+      --name submariner-natdiscovery
+      --frontend-ip-name {{ _azure_frontend }}
+      --backend-pool-name submariner-gateway
+      --protocol Udp
+      --frontend-port 4490
+      --backend-port 4490
+      --probe-name submariner-gateway-probe
+      --disable-outbound-snat true
+      -o none
+  register: _lb_natdisc
+  changed_when: "'already exists' not in _lb_natdisc.stderr"
+  failed_when: _lb_natdisc.rc != 0 and 'already exists' not in _lb_natdisc.stderr
+
+- name: "{{ managed_host }} — Azure LB rules configured for Submariner"
+  ansible.builtin.debug:
+    msg: >-
+      Azure NSG and LB rules configured for Submariner on {{ hostvars[managed_host].cluster_name }}.
+      Backend pool: submariner-gateway (node: {{ _gw_node }}).
+      LB rules: UDP 4500 (IPsec NAT-T), UDP 4490 (NAT discovery).

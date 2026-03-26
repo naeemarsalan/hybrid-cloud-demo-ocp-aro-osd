@@ -1,0 +1,120 @@
+---
+- name: "{{ dest_host }} — Set destination vars"
+  ansible.builtin.set_fact:
+    _dest_cluster_name: "{{ hostvars[dest_host].cluster_name }}"
+    _dest_kubeconfig: "{{ hostvars[dest_host].kubeconfig }}"
+    _dest_px_endpoint: "{{ hostvars[dest_host].px_endpoint | default('') }}"
+
+# --- SA token on destination cluster (long-lived, 1 year) ---
+
+- name: "{{ dest_host }} — Create stork-migration ServiceAccount"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ _dest_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: stork-migration
+        namespace: "{{ app_namespace }}"
+
+- name: "{{ dest_host }} — Create ClusterRoleBinding for stork-migration SA"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ _dest_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: "stork-migration-{{ _dest_cluster_name }}"
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: cluster-admin
+      subjects:
+        - kind: ServiceAccount
+          name: stork-migration
+          namespace: "{{ app_namespace }}"
+
+- name: "{{ dest_host }} — Generate long-lived SA token"
+  ansible.builtin.command:
+    cmd: >-
+      oc --kubeconfig={{ _dest_kubeconfig }}
+      create token stork-migration -n {{ app_namespace }}
+      --duration={{ sa_token_duration }}
+  register: dest_sa_token
+  changed_when: false
+
+- name: "{{ dest_host }} — Get destination API URL"
+  ansible.builtin.command:
+    cmd: oc --kubeconfig={{ _dest_kubeconfig }} whoami --show-server
+  register: dest_api_url
+  changed_when: false
+
+# --- Get Portworx cluster token from destination ---
+
+- name: "{{ dest_host }} — Get PX cluster token"
+  ansible.builtin.shell:
+    cmd: >-
+      oc --kubeconfig={{ _dest_kubeconfig }} -n {{ px_namespace }}
+      exec $(oc --kubeconfig={{ _dest_kubeconfig }} -n {{ px_namespace }} get pods -l name=portworx -o jsonpath='{.items[0].metadata.name}')
+      -- /opt/pwx/bin/pxctl cluster token show
+  register: dest_px_token_raw
+  changed_when: false
+
+- name: "{{ dest_host }} — Parse PX token"
+  ansible.builtin.set_fact:
+    _dest_px_token: "{{ dest_px_token_raw.stdout | regex_replace('^Token is ', '') }}"
+
+# --- Portworx NodePort service on destination cluster ---
+
+- name: "{{ dest_host }} — Create Portworx NodePort service"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ _dest_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: portworx-api-nodeport
+        namespace: "{{ px_namespace }}"
+      spec:
+        type: NodePort
+        selector:
+          name: portworx
+        ports:
+          - port: 9001
+            targetPort: 17001
+            nodePort: 30901
+            protocol: TCP
+            name: px-api
+
+# --- ClusterPair on source cluster ---
+
+- name: "{{ dest_host }} — Create ClusterPair on source (on-prem)"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    template: clusterpair.yaml.j2
+
+- name: "{{ dest_host }} — Wait for ClusterPair scheduler to be Ready"
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    api_version: stork.libopenstorage.org/v1alpha1
+    kind: ClusterPair
+    name: "{{ _dest_cluster_name }}"
+    namespace: "{{ app_namespace }}"
+  register: cp_status
+  until: >-
+    cp_status.resources | length > 0 and
+    cp_status.resources[0].status.schedulerStatus | default('') == 'Ready'
+  retries: 30
+  delay: 10
+
+- name: "{{ dest_host }} — Report ClusterPair status"
+  ansible.builtin.debug:
+    msg: >-
+      ClusterPair {{ _dest_cluster_name }}:
+      Scheduler={{ cp_status.resources[0].status.schedulerStatus | default('Unknown') }},
+      Storage={{ cp_status.resources[0].status.storageStatus | default('Unknown') }}
+  when: cp_status.resources | length > 0

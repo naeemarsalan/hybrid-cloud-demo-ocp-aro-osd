@@ -1,0 +1,33 @@
+---
+- name: "{{ managed_host }} — Set cluster vars"
+  ansible.builtin.set_fact:
+    _cluster_name: "{{ hostvars[managed_host].cluster_name }}"
+    _cluster_kubeconfig: "{{ hostvars[managed_host].kubeconfig }}"
+
+- name: "{{ managed_host }} — Wait for Submariner gateway pod Running"
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ _cluster_kubeconfig }}"
+    api_version: v1
+    kind: Pod
+    namespace: submariner-operator
+    label_selectors:
+      - "app=submariner-gateway"
+  register: gw_pods
+  until: >-
+    gw_pods.resources | length > 0 and
+    gw_pods.resources | map(attribute='status.phase') | select('equalto', 'Running') | list | length > 0
+  retries: 60
+  delay: 10
+
+- name: "{{ managed_host }} — Verify Submariner connection on hub"
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    api_version: submarineraddon.open-cluster-management.io/v1alpha1
+    kind: SubmarinerConfig
+    name: submariner
+    namespace: "{{ _cluster_name }}"
+  register: subm_config
+  until: >-
+    subm_config.resources | length > 0
+  retries: 30
+  delay: 10

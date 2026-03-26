@@ -1,0 +1,36 @@
+---
+- name: "{{ managed_host }} — Set cluster vars"
+  ansible.builtin.set_fact:
+    _cluster_name: "{{ hostvars[managed_host].cluster_name }}"
+
+- name: "{{ managed_host }} — Create SubmarinerConfig"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: submarineraddon.open-cluster-management.io/v1alpha1
+      kind: SubmarinerConfig
+      metadata:
+        name: submariner
+        namespace: "{{ _cluster_name }}"
+      spec:
+        globalCIDR: ""
+        IPSecNATTPort: 4500
+        NATTEnable: true
+        cableDriver: libreswan
+        globalnetEnable: "{{ submariner_globalnet | default(true) }}"
+        gatewayConfig:
+          gateways: 1
+
+- name: "{{ managed_host }} — Create ManagedClusterAddon for Submariner"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: addon.open-cluster-management.io/v1alpha1
+      kind: ManagedClusterAddOn
+      metadata:
+        name: submariner
+        namespace: "{{ _cluster_name }}"
+      spec:
+        installNamespace: submariner-operator

@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: phoenix-postgres
+  namespace: phoenix
+  labels:
+    app: phoenix-postgres
+    app.kubernetes.io/part-of: phoenix
+    tier: database
+spec:
+  serviceName: phoenix-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: phoenix-postgres
+  template:
+    metadata:
+      labels:
+        app: phoenix-postgres
+        app.kubernetes.io/part-of: phoenix
+        tier: database
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: phoenix
+            - name: POSTGRES_DB
+              value: phoenix
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: phoenix-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - phoenix
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - phoenix
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: px-csi-db
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: phoenix-postgres
+  namespace: phoenix
+  labels:
+    app: phoenix-postgres
+    app.kubernetes.io/part-of: phoenix
+spec:
+  selector:
+    app: phoenix-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+  type: ClusterIP

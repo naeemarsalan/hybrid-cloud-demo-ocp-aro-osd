@@ -1,0 +1,6 @@
+---
+- name: Submariner — Cross-Cluster Networking
+  hosts: hub
+  gather_facts: false
+  roles:
+    - submariner

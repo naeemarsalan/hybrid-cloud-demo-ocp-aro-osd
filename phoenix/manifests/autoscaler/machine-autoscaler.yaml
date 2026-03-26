@@ -1,0 +1,14 @@
+apiVersion: autoscaling.openshift.io/v1beta1
+kind: MachineAutoscaler
+metadata:
+  name: osd-gcp-worker-autoscaler
+  namespace: openshift-machine-api
+spec:
+  minReplicas: 3
+  maxReplicas: 6
+  scaleTargetRef:
+    apiVersion: machine.openshift.io/v1beta1
+    kind: MachineSet
+    # Update this to match your OSD MachineSet name
+    # Find with: oc get machineset -n openshift-machine-api
+    name: REPLACE_WITH_MACHINESET_NAME

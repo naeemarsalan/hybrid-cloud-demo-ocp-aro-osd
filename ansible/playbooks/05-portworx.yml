@@ -1,0 +1,7 @@
+---
+- name: Portworx — Install Storage on All Clusters
+  hosts: all
+  serial: 1
+  gather_facts: false
+  roles:
+    - portworx

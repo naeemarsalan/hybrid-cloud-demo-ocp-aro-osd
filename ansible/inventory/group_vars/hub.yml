@@ -1,0 +1,7 @@
+# ACM Hub settings
+acm_namespace: open-cluster-management
+acm_channel: release-2.12
+acm_csv_prefix: advanced-cluster-management
+
+# MultiClusterHub
+mch_name: multiclusterhub

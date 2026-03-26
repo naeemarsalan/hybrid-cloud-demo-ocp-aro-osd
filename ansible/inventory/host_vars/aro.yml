@@ -1,0 +1,5 @@
+# Azure service principal credentials for Portworx on ARO
+# Set via environment variables or create a local aro-secrets.yml
+azure_client_id: "{{ lookup('env', 'AZURE_CLIENT_ID') | default('CHANGEME', true) }}"
+azure_client_secret: "{{ lookup('env', 'AZURE_CLIENT_SECRET') | default('CHANGEME', true) }}"
+azure_tenant_id: "{{ lookup('env', 'AZURE_TENANT_ID') | default('CHANGEME', true) }}"

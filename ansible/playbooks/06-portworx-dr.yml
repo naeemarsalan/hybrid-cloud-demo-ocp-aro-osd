@@ -1,0 +1,6 @@
+---
+- name: Portworx DR — ClusterPairs, Proxy, MigrationSchedules
+  hosts: hub
+  gather_facts: false
+  roles:
+    - portworx-dr

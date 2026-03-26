@@ -1,0 +1,6 @@
+---
+- name: Cluster Configuration — Labels, Namespaces, StorageClasses, SCCs
+  hosts: all
+  gather_facts: false
+  roles:
+    - cluster-config

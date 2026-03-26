@@ -1,0 +1,24 @@
+---
+# Master playbook — runs all steps in order
+- name: Hybrid Cloud Demo — Full Setup
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Display setup banner
+      ansible.builtin.debug:
+        msg: |
+          =============================================
+          Hybrid Cloud Demo — Automated Setup
+          =============================================
+          Hub:     {{ hostvars['onprem'].cluster_name }}
+          Managed: {{ hostvars['aro'].cluster_name }}, {{ hostvars['osd'].cluster_name }}
+          =============================================
+
+- import_playbook: playbooks/01-cluster-config.yml
+- import_playbook: playbooks/02-acm.yml
+- import_playbook: playbooks/03-acm-import.yml
+- import_playbook: playbooks/03a-argocd.yml
+- import_playbook: playbooks/04-submariner.yml
+- import_playbook: playbooks/05-portworx.yml
+- import_playbook: playbooks/06-portworx-dr.yml
+- import_playbook: playbooks/07-phoenix.yml

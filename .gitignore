@@ -1,0 +1,53 @@
+# Credentials — never commit
+creds
+creds.txt
+gcp
+google.json
+scripts/config.sh
+acm/channel/git-secret.yaml
+osd/creds
+osd/creds_old
+osd/sa.json
+osd/pull-secret.txt
+aro/cresd
+aro/pull-secret.txt
+az_creds
+*.pem
+*.key
+*.subm
+broker-info.subm
+
+# Terraform plans (binary, may contain secrets)
+terraform/tfplan
+terraform/tfplan-aro
+
+# Ansible secrets (local overrides with real credentials)
+ansible/inventory/group_vars/secrets.yml
+ansible/inventory/host_vars/*-secrets.yml
+
+# Terraform
+terraform/.terraform/
+terraform/**/.terraform/
+*.tfstate
+*.tfstate.backup
+terraform.tfvars
+.terraform.lock.hcl
+**/osd-ccs-admin-key.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+osd/ocm_linux_amd64.zip
+
+# Claude project files
+.claude/
+osd/.claude/
+.mcp.json

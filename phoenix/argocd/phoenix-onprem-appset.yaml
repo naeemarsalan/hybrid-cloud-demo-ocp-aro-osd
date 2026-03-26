@@ -1,0 +1,51 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: phoenix-onprem
+  namespace: openshift-gitops
+spec:
+  generators:
+    - clusterDecisionResource:
+        configMapRef: acm-placement
+        labelSelector:
+          matchLabels:
+            cluster.open-cluster-management.io/placement: phoenix-onprem
+        requeueAfterSeconds: 180
+  template:
+    metadata:
+      name: phoenix-onprem-{{name}}
+      labels:
+        velero.io/exclude-from-backup: "true"
+        app.kubernetes.io/part-of: phoenix
+    spec:
+      project: default
+      sources:
+        - repoURL: https://github.com/naeemarsalan/hybrid-cloud-demo-ocp-aro-osd.git
+          targetRevision: main
+          path: phoenix/manifests/onprem
+      destination:
+        namespace: phoenix
+        server: "{{server}}"
+      syncPolicy:
+        automated:
+          selfHeal: true
+          prune: true
+        syncOptions:
+          - CreateNamespace=true
+          - PruneLast=true
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: phoenix-onprem
+  namespace: openshift-gitops
+spec:
+  numberOfClusters: 1
+  clusterSets:
+    - hybrid-cloud-demo
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            cloud: on-prem
+            environment: demo

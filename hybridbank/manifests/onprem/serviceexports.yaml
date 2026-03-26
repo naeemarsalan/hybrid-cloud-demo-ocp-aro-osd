@@ -1,0 +1,15 @@
+apiVersion: multicluster.x-k8s.io/v1alpha1
+kind: ServiceExport
+metadata:
+  name: account-service
+  namespace: hybridbank
+  labels:
+    app.kubernetes.io/part-of: hybridbank
+---
+apiVersion: multicluster.x-k8s.io/v1alpha1
+kind: ServiceExport
+metadata:
+  name: transaction-service
+  namespace: hybridbank
+  labels:
+    app.kubernetes.io/part-of: hybridbank

@@ -1,0 +1,125 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metrics-proxy-script
+  namespace: phoenix
+  labels:
+    app: metrics-proxy
+    app.kubernetes.io/part-of: phoenix
+data:
+  proxy.py: |
+    #!/usr/bin/env python3
+    import http.server, json, urllib.request, os, time
+
+    METRICS_URL = os.environ.get("METRICS_URL", "http://phoenix.phoenix.svc.clusterset.local:9090/metrics")
+    last_spans_count = 0
+    last_check_time = time.time()
+
+    class MetricsHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            global last_spans_count, last_check_time
+            try:
+                req = urllib.request.Request(METRICS_URL)
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    raw = resp.read().decode()
+                spans_count = 0
+                cpu_total = 0.0
+                for line in raw.split('\n'):
+                    if line.startswith('process_cpu_seconds_total '):
+                        cpu_total = float(line.split()[-1])
+                    if 'starlette_requests_processing_time_seconds_summary_count{method="POST"' in line:
+                        spans_count += float(line.split()[-1])
+                now = time.time()
+                elapsed = max(now - last_check_time, 1)
+                rate = max((spans_count - last_spans_count) / elapsed, 0)
+                last_spans_count = spans_count
+                last_check_time = now
+                result = {"spans_total": spans_count, "cpu_seconds": cpu_total, "request_rate": round(rate, 2)}
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(result).encode())
+            except Exception as e:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"spans_total": 0, "cpu_seconds": 0, "request_rate": 0, "error": str(e)}).encode())
+        def log_message(self, format, *args):
+            pass
+
+    server = http.server.HTTPServer(("0.0.0.0", 8080), MetricsHandler)
+    print(f"Metrics proxy on :8080, upstream: {METRICS_URL}", flush=True)
+    server.serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-proxy
+  namespace: phoenix
+  labels:
+    app: metrics-proxy
+    app.kubernetes.io/part-of: phoenix
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metrics-proxy
+  template:
+    metadata:
+      labels:
+        app: metrics-proxy
+        app.kubernetes.io/part-of: phoenix
+    spec:
+      containers:
+        - name: metrics-proxy
+          image: python:3.11-slim
+          command: ["python3", "/scripts/proxy.py"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: METRICS_URL
+              value: "http://phoenix.phoenix.svc.clusterset.local:9090/metrics"
+          volumeMounts:
+            - name: proxy-script
+              mountPath: /scripts
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: proxy-script
+          configMap:
+            name: metrics-proxy-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metrics-proxy
+  namespace: phoenix
+  labels:
+    app: metrics-proxy
+    app.kubernetes.io/part-of: phoenix
+spec:
+  selector:
+    app: metrics-proxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

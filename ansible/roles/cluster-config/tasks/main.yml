@@ -1,0 +1,106 @@
+---
+- name: Set KUBECONFIG for this cluster
+  ansible.builtin.set_fact:
+    k8s_kubeconfig: "{{ onprem_kubeconfig | default(kubeconfig) }}"
+
+- name: Set hub KUBECONFIG (for ACM operations)
+  ansible.builtin.set_fact:
+    hub_kubeconfig: "{{ kubeconfig }}"
+  when: inventory_hostname == 'onprem'
+
+- name: Create application namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ app_namespace }}"
+        labels:
+          app.kubernetes.io/part-of: hybridbank
+
+- name: Apply StorageClasses
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition: "{{ item }}"
+  loop:
+    - apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: px-csi-replicated
+      provisioner: pxd.portworx.com
+      parameters:
+        repl: "3"
+        io_profile: db_remote
+        priority_io: "high"
+      reclaimPolicy: Retain
+      allowVolumeExpansion: true
+      volumeBindingMode: Immediate
+    - apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: px-csi-db
+      provisioner: pxd.portworx.com
+      parameters:
+        repl: "3"
+        io_profile: db
+        priority_io: "high"
+      reclaimPolicy: Retain
+      allowVolumeExpansion: true
+      volumeBindingMode: Immediate
+
+- name: Create postgres ServiceAccount
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: postgres-sa
+        namespace: "{{ app_namespace }}"
+        labels:
+          app.kubernetes.io/part-of: hybridbank
+
+- name: Grant anyuid SCC to postgres-sa
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: hybridbank-postgres-anyuid
+        labels:
+          app.kubernetes.io/part-of: hybridbank
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: system:openshift:scc:anyuid
+      subjects:
+        - kind: ServiceAccount
+          name: postgres-sa
+          namespace: "{{ app_namespace }}"
+
+- name: Label cluster on hub (hub only)
+  when: inventory_hostname == 'onprem'
+  block:
+    - name: Label managed clusters
+      kubernetes.core.k8s:
+        kubeconfig: "{{ hub_kubeconfig | default(k8s_kubeconfig) }}"
+        state: present
+        merge_type: merge
+        definition:
+          apiVersion: cluster.open-cluster-management.io/v1
+          kind: ManagedCluster
+          metadata:
+            name: "{{ hostvars[item].cluster_name }}"
+            labels:
+              cloud: "{{ hostvars[item].cloud }}"
+              environment: demo
+              vendor: OpenShift
+              cluster.open-cluster-management.io/clusterset: "{{ clusterset_name }}"
+              data-zone: "{{ hostvars[item].data_zone }}"
+      loop: "{{ groups['all'] }}"

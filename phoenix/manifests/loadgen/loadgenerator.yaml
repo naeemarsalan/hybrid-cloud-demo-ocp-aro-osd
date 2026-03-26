@@ -1,0 +1,258 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: phoenix-loadgenerator
+  namespace: phoenix
+  labels:
+    app: phoenix-loadgenerator
+    app.kubernetes.io/part-of: phoenix
+    tier: test
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: phoenix-loadgenerator
+  template:
+    metadata:
+      labels:
+        app: phoenix-loadgenerator
+        app.kubernetes.io/part-of: phoenix
+        tier: test
+    spec:
+      containers:
+        - name: loadgenerator
+          image: python:3.12-slim
+          command:
+            - python
+            - /scripts/loadgen.py
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: PHOENIX_GRPC_ENDPOINT
+              value: http://phoenix.phoenix.svc.cluster.local:4317
+            - name: PHOENIX_HTTP_ENDPOINT
+              value: http://phoenix.phoenix.svc.cluster.local:6006
+            - name: CONCURRENT_WORKERS
+              value: "20"
+            - name: TRACES_PER_SECOND
+              value: "50"
+            - name: SPAN_DEPTH
+              value: "5"
+            - name: DURATION_SECONDS
+              value: "600"
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: scripts
+          configMap:
+            name: phoenix-loadgen-script
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: phoenix-loadgen-script
+  namespace: phoenix
+  labels:
+    app: phoenix-loadgenerator
+    app.kubernetes.io/part-of: phoenix
+data:
+  loadgen.py: |
+    #!/usr/bin/env python3
+    """
+    Phoenix Load Generator — sends OTLP traces to Phoenix to simulate
+    heavy AI observability workload and trigger burst scaling.
+
+    Uses raw HTTP/protobuf to send OTLP traces (no pip install needed).
+    Falls back to JSON OTLP if protobuf unavailable.
+    """
+    import json
+    import os
+    import random
+    import string
+    import sys
+    import time
+    import uuid
+    import struct
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from urllib.request import Request, urlopen
+    from urllib.error import URLError
+
+    PHOENIX_HTTP = os.environ.get("PHOENIX_HTTP_ENDPOINT", "http://phoenix:6006")
+    WORKERS = int(os.environ.get("CONCURRENT_WORKERS", "20"))
+    TPS = int(os.environ.get("TRACES_PER_SECOND", "50"))
+    DEPTH = int(os.environ.get("SPAN_DEPTH", "5"))
+    DURATION = int(os.environ.get("DURATION_SECONDS", "600"))
+
+    # Phoenix REST spans API
+    SPANS_URL = f"{PHOENIX_HTTP}/v1/projects/default/spans"
+
+    LLM_MODELS = [
+        "gpt-4o", "gpt-4-turbo", "claude-3.5-sonnet", "claude-3-opus",
+        "gemini-1.5-pro", "llama-3.1-70b", "mixtral-8x7b", "command-r-plus"
+    ]
+
+    PROMPTS = [
+        "Explain quantum computing in simple terms",
+        "Write a Python function to sort a list",
+        "Summarize the key points of this document",
+        "Translate the following text to French",
+        "Generate a SQL query to find top customers",
+        "What are the best practices for microservices?",
+        "Debug this error: ConnectionRefusedError",
+        "Create a REST API design for a banking system",
+        "Analyze the sentiment of this customer review",
+        "Generate unit tests for the authentication module",
+    ]
+
+    def random_hex(n):
+        return ''.join(random.choices('0123456789abcdef', k=n))
+
+    def make_spans_batch():
+        """Generate a batch of realistic LLM spans using Phoenix REST API format."""
+        trace_id = random_hex(32)
+        model = random.choice(LLM_MODELS)
+        prompt = random.choice(PROMPTS)
+
+        spans = []
+        parent_span_id = None
+
+        span_types = [
+            ("LLM request", "LLM"),
+            ("retrieval", "RETRIEVER"),
+            ("embedding", "EMBEDDING"),
+            ("chain", "CHAIN"),
+            ("tool_call", "TOOL"),
+        ]
+
+        now = time.time()
+
+        for i in range(min(DEPTH, len(span_types))):
+            span_id = random_hex(16)
+            span_name, span_kind = span_types[i]
+            start_t = now + (i * 0.05)
+            end_t = start_t + random.uniform(0.01, 0.2)
+
+            input_tokens = random.randint(50, 2000)
+            output_tokens = random.randint(20, 1000)
+
+            span = {
+                "name": f"{span_name}/{model}" if i == 0 else span_name,
+                "span_kind": span_kind,
+                "context": {
+                    "trace_id": trace_id,
+                    "span_id": span_id,
+                },
+                "start_time": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(start_t)) + f".{int((start_t % 1)*1000):03d}Z",
+                "end_time": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(end_t)) + f".{int((end_t % 1)*1000):03d}Z",
+                "attributes": {
+                    "llm.model_name": model,
+                    "llm.token_count.prompt": input_tokens,
+                    "llm.token_count.completion": output_tokens,
+                    "llm.token_count.total": input_tokens + output_tokens,
+                    "input.value": prompt[:200],
+                    "output.value": f"Generated response for: {prompt[:50]}...",
+                    "openinference.span.kind": span_kind,
+                    "session.id": f"session-{random.randint(1,100)}",
+                    "user.id": f"user-{random.randint(1,50)}",
+                },
+                "status_code": "OK",
+            }
+
+            if parent_span_id:
+                span["parent_id"] = parent_span_id
+
+            spans.append(span)
+            parent_span_id = span_id
+
+        return {"data": spans}
+
+    def send_trace():
+        """Send spans to Phoenix REST API."""
+        batch = make_spans_batch()
+        data = json.dumps(batch).encode("utf-8")
+        req = Request(
+            SPANS_URL,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(req, timeout=10) as resp:
+                return resp.status
+        except URLError as e:
+            return f"ERR: {e}"
+        except Exception as e:
+            return f"ERR: {e}"
+
+    def main():
+        print("=" * 50)
+        print(" Phoenix Load Generator")
+        print("=" * 50)
+        print(f" Target:      {SPANS_URL}")
+        print(f" Workers:     {WORKERS}")
+        print(f" Traces/sec:  {TPS}")
+        print(f" Span depth:  {DEPTH}")
+        print(f" Duration:    {DURATION}s")
+        print("=" * 50)
+        print()
+
+        # Wait for Phoenix to be ready
+        print("Waiting for Phoenix to be ready...")
+        for attempt in range(60):
+            try:
+                req = Request(f"{PHOENIX_HTTP}/healthz", method="GET")
+                with urlopen(req, timeout=5) as resp:
+                    if resp.status == 200:
+                        print("Phoenix is ready!")
+                        break
+            except Exception:
+                pass
+            time.sleep(5)
+        else:
+            print("WARNING: Phoenix not ready after 5 min, starting anyway...")
+
+        print(f"\nStarting load generation...")
+
+        end_time = time.time() + DURATION
+        total_sent = 0
+        total_errors = 0
+        batch_delay = WORKERS / max(TPS, 1)
+
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+            while time.time() < end_time:
+                batch_start = time.time()
+                futures = [pool.submit(send_trace) for _ in range(WORKERS)]
+
+                for f in as_completed(futures):
+                    result = f.result()
+                    if isinstance(result, int) and 200 <= result < 300:
+                        total_sent += 1
+                    else:
+                        total_errors += 1
+
+                elapsed = time.time() - batch_start
+                if elapsed < batch_delay:
+                    time.sleep(batch_delay - elapsed)
+
+                if total_sent % 500 == 0 and total_sent > 0:
+                    rate = total_sent / max(time.time() - (end_time - DURATION), 1)
+                    print(f"[{time.strftime('%H:%M:%S')}] Sent: {total_sent} "
+                          f"Errors: {total_errors} Rate: {rate:.1f} traces/s")
+
+        print()
+        print("=" * 50)
+        print(f" Load generation complete")
+        print(f" Total sent:   {total_sent}")
+        print(f" Total errors: {total_errors}")
+        print("=" * 50)
+
+    if __name__ == "__main__":
+        main()

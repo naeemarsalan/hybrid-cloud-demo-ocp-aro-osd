@@ -1,0 +1,14 @@
+apiVersion: stork.libopenstorage.org/v1alpha1
+kind: SchedulePolicy
+metadata:
+  name: hybridbank-schedule
+  namespace: hybridbank
+  labels:
+    app.kubernetes.io/part-of: hybridbank
+policy:
+  interval:
+    intervalMinutes: 1
+    retain: 4
+  daily:
+    time: "2:00am"
+    retain: 7

@@ -1,0 +1,39 @@
+apiVersion: stork.libopenstorage.org/v1alpha1
+kind: MigrationSchedule
+metadata:
+  name: hybridbank-core-migration
+  namespace: hybridbank
+  labels:
+    app.kubernetes.io/part-of: hybridbank
+spec:
+  template:
+    spec:
+      clusterPair: aro-east
+      includeResources: false
+      includeVolumes: true
+      startApplications: false
+      namespaces:
+        - hybridbank
+      selectors:
+        app: postgres-core
+  schedulePolicyName: hybridbank-schedule
+---
+apiVersion: stork.libopenstorage.org/v1alpha1
+kind: MigrationSchedule
+metadata:
+  name: hybridbank-core-migration-gcp
+  namespace: hybridbank
+  labels:
+    app.kubernetes.io/part-of: hybridbank
+spec:
+  template:
+    spec:
+      clusterPair: osd-gcp
+      includeResources: false
+      includeVolumes: true
+      startApplications: false
+      namespaces:
+        - hybridbank
+      selectors:
+        app: postgres-core
+  schedulePolicyName: hybridbank-schedule

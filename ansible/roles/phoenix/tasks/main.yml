@@ -1,0 +1,145 @@
+---
+- name: Set KUBECONFIG for hub
+  ansible.builtin.set_fact:
+    k8s_kubeconfig: "{{ kubeconfig }}"
+
+# ===========================================================
+#  A) Create Placements for Phoenix in openshift-gitops
+# ===========================================================
+
+- name: "Create Placement — phoenix-all-clusters"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: cluster.open-cluster-management.io/v1beta1
+      kind: Placement
+      metadata:
+        name: phoenix-all-clusters
+        namespace: openshift-gitops
+      spec:
+        clusterSets:
+          - "{{ clusterset_name }}"
+        predicates:
+          - requiredClusterSelector:
+              labelSelector:
+                matchLabels:
+                  environment: demo
+
+- name: "Create Placement — phoenix-onprem"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: cluster.open-cluster-management.io/v1beta1
+      kind: Placement
+      metadata:
+        name: phoenix-onprem
+        namespace: openshift-gitops
+      spec:
+        numberOfClusters: 1
+        clusterSets:
+          - "{{ clusterset_name }}"
+        predicates:
+          - requiredClusterSelector:
+              labelSelector:
+                matchLabels:
+                  cloud: on-prem
+                  environment: demo
+
+- name: "Create Placement — phoenix-burst (no clusters until labeled)"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: cluster.open-cluster-management.io/v1beta1
+      kind: Placement
+      metadata:
+        name: phoenix-burst
+        namespace: openshift-gitops
+      spec:
+        clusterSets:
+          - "{{ clusterset_name }}"
+        predicates:
+          - requiredClusterSelector:
+              labelSelector:
+                matchLabels:
+                  environment: demo
+                  phoenix-burst: "true"
+
+# ===========================================================
+#  B) Apply Phoenix ApplicationSet manifests
+# ===========================================================
+
+- name: Apply Phoenix ArgoCD manifests
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    src: "{{ item }}"
+  loop:
+    - "{{ playbook_dir }}/../../phoenix/argocd/phoenix-base-appset.yaml"
+    - "{{ playbook_dir }}/../../phoenix/argocd/phoenix-onprem-appset.yaml"
+    - "{{ playbook_dir }}/../../phoenix/argocd/phoenix-burst-appset.yaml"
+    - "{{ playbook_dir }}/../../phoenix/argocd/phoenix-loadgen-appset.yaml"
+  loop_control:
+    label: "{{ item | basename }}"
+
+# ===========================================================
+#  C) Wait for Phoenix to be ready on on-prem
+# ===========================================================
+
+- name: Wait for Phoenix namespace to exist on on-prem
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ hostvars['onprem'].onprem_kubeconfig | default(hostvars['onprem'].kubeconfig) }}"
+    api_version: v1
+    kind: Namespace
+    name: phoenix
+  register: phoenix_ns
+  until: phoenix_ns.resources | length > 0
+  retries: 30
+  delay: 10
+
+- name: Wait for Phoenix PostgreSQL to be ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ hostvars['onprem'].onprem_kubeconfig | default(hostvars['onprem'].kubeconfig) }}"
+    api_version: apps/v1
+    kind: StatefulSet
+    namespace: phoenix
+    name: phoenix-postgres
+  register: pg_sts
+  until: >-
+    pg_sts.resources | length > 0 and
+    (pg_sts.resources[0].status.readyReplicas | default(0)) >= 1
+  retries: 36
+  delay: 10
+
+- name: Wait for Phoenix server to be ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ hostvars['onprem'].onprem_kubeconfig | default(hostvars['onprem'].kubeconfig) }}"
+    api_version: apps/v1
+    kind: Deployment
+    namespace: phoenix
+    name: phoenix
+  register: phoenix_deploy
+  until: >-
+    phoenix_deploy.resources | length > 0 and
+    (phoenix_deploy.resources[0].status.readyReplicas | default(0)) >= 1
+  retries: 36
+  delay: 10
+
+- name: Get Phoenix route
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ hostvars['onprem'].onprem_kubeconfig | default(hostvars['onprem'].kubeconfig) }}"
+    api_version: route.openshift.io/v1
+    kind: Route
+    namespace: phoenix
+    name: phoenix
+  register: phoenix_route
+
+- name: Phoenix deployment complete
+  ansible.builtin.debug:
+    msg: >-
+      Phoenix AI Observability deployed successfully.
+      ApplicationSets: phoenix-base, phoenix-onprem, phoenix-burst, phoenix-loadgen.
+      Placements: phoenix-all-clusters, phoenix-onprem, phoenix-burst.
+      Route: https://{{ phoenix_route.resources[0].spec.host | default('pending') }}

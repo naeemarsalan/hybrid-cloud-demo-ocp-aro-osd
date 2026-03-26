@@ -1,0 +1,45 @@
+---
+# Setup PX objectstore credentials on a single cluster.
+# Expected variables:
+#   _objectstore_kubeconfig  — kubeconfig path for the target cluster
+#   _objectstore_cluster     — human-readable cluster name (for task names)
+
+- name: "{{ _objectstore_cluster }} — Get PX cluster UUID"
+  ansible.builtin.shell:
+    cmd: >-
+      oc --kubeconfig={{ _objectstore_kubeconfig }} -n {{ px_namespace }}
+      exec $(oc --kubeconfig={{ _objectstore_kubeconfig }} -n {{ px_namespace }} get pods -l name=portworx -o jsonpath='{.items[0].metadata.name}')
+      -- /opt/pwx/bin/pxctl status
+      | grep 'Cluster UUID:'
+      | awk '{print $NF}'
+  register: _px_uuid_raw
+  changed_when: false
+
+- name: "{{ _objectstore_cluster }} — Store PX cluster UUID"
+  ansible.builtin.set_fact:
+    _px_cluster_uuid: "{{ _px_uuid_raw.stdout | trim }}"
+
+- name: "{{ _objectstore_cluster }} — Check if objectstore credential already exists"
+  ansible.builtin.shell:
+    cmd: >-
+      oc --kubeconfig={{ _objectstore_kubeconfig }} -n {{ px_namespace }}
+      exec $(oc --kubeconfig={{ _objectstore_kubeconfig }} -n {{ px_namespace }} get pods -l name=portworx -o jsonpath='{.items[0].metadata.name}')
+      -- /opt/pwx/bin/pxctl credentials list
+  register: _px_creds_list
+  changed_when: false
+
+- name: "{{ _objectstore_cluster }} — Create objectstore credential"
+  ansible.builtin.shell:
+    cmd: >-
+      oc --kubeconfig={{ _objectstore_kubeconfig }} -n {{ px_namespace }}
+      exec $(oc --kubeconfig={{ _objectstore_kubeconfig }} -n {{ px_namespace }} get pods -l name=portworx -o jsonpath='{.items[0].metadata.name}')
+      -- /opt/pwx/bin/pxctl credentials create
+      --provider azure
+      --azure-account-name {{ px_objectstore_account }}
+      --azure-account-key {{ px_objectstore_key }}
+      clusterPair_{{ _px_cluster_uuid }}
+  when: "'clusterPair_' + _px_cluster_uuid not in _px_creds_list.stdout"
+
+- name: "{{ _objectstore_cluster }} — Verify objectstore credential exists"
+  ansible.builtin.debug:
+    msg: "Objectstore credential clusterPair_{{ _px_cluster_uuid }} is configured on {{ _objectstore_cluster }}"

@@ -1,0 +1,25 @@
+apiVersion: stork.libopenstorage.org/v1alpha1
+kind: ClusterPair
+metadata:
+  name: "{{ _dest_cluster_name }}"
+  namespace: "{{ app_namespace }}"
+spec:
+  config:
+    clusters:
+      {{ _dest_cluster_name }}:
+        server: "{{ dest_api_url.stdout }}"
+        insecure-skip-tls-verify: true
+    contexts:
+      {{ _dest_cluster_name }}:
+        cluster: "{{ _dest_cluster_name }}"
+        user: "{{ _dest_cluster_name }}"
+    current-context: "{{ _dest_cluster_name }}"
+    users:
+      {{ _dest_cluster_name }}:
+        token: "{{ dest_sa_token.stdout }}"
+{% if _dest_px_endpoint %}
+  options:
+    ip: "{{ _dest_px_endpoint.split(':')[0] }}"
+    port: "{{ _dest_px_endpoint.split(':')[1] | default('30901') }}"
+    token: "{{ _dest_px_token }}"
+{% endif %}

@@ -1,0 +1,176 @@
+---
+- name: Set KUBECONFIG for hub
+  ansible.builtin.set_fact:
+    k8s_kubeconfig: "{{ kubeconfig }}"
+
+# ===========================================================
+#  A) Wait for OpenShift GitOps operator to be ready
+# ===========================================================
+
+- name: Wait for ArgoCD server pod in openshift-gitops namespace
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    api_version: v1
+    kind: Pod
+    namespace: openshift-gitops
+    label_selectors:
+      - "app.kubernetes.io/name=openshift-gitops-server"
+  register: argocd_pods
+  until: >-
+    argocd_pods.resources | length > 0 and
+    argocd_pods.resources | selectattr('status.phase', 'equalto', 'Running') | list | length > 0
+  retries: 60
+  delay: 10
+
+- name: ArgoCD server is running
+  ansible.builtin.debug:
+    msg: "ArgoCD server pod is ready in openshift-gitops namespace."
+
+# ===========================================================
+#  B) Create ArgoCD cluster secrets for managed + on-prem
+# ===========================================================
+
+- name: Build list of target clusters (managed + onprem)
+  ansible.builtin.set_fact:
+    argocd_target_hosts: "{{ groups['managed'] + ['onprem'] }}"
+
+- name: Register ArgoCD cluster secrets for each target cluster
+  ansible.builtin.include_tasks: register-cluster.yml
+  loop: "{{ argocd_target_hosts }}"
+  loop_control:
+    loop_var: target_host
+
+# ===========================================================
+#  C) Create ManagedClusterSetBinding in openshift-gitops
+# ===========================================================
+
+- name: Create ManagedClusterSetBinding for GitOps namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: cluster.open-cluster-management.io/v1beta2
+      kind: ManagedClusterSetBinding
+      metadata:
+        name: "{{ clusterset_name }}"
+        namespace: openshift-gitops
+      spec:
+        clusterSet: "{{ clusterset_name }}"
+
+# ===========================================================
+#  D) Create Placement resources in openshift-gitops
+# ===========================================================
+
+- name: "Create Placement — hybridbank-all-clusters"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: cluster.open-cluster-management.io/v1beta1
+      kind: Placement
+      metadata:
+        name: hybridbank-all-clusters
+        namespace: openshift-gitops
+      spec:
+        clusterSets:
+          - "{{ clusterset_name }}"
+        predicates:
+          - requiredClusterSelector:
+              labelSelector:
+                matchLabels:
+                  environment: demo
+
+- name: "Create Placement — hybridbank-onprem"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: cluster.open-cluster-management.io/v1beta1
+      kind: Placement
+      metadata:
+        name: hybridbank-onprem
+        namespace: openshift-gitops
+      spec:
+        numberOfClusters: 1
+        clusterSets:
+          - "{{ clusterset_name }}"
+        predicates:
+          - requiredClusterSelector:
+              labelSelector:
+                matchLabels:
+                  cloud: on-prem
+                  environment: demo
+
+- name: "Create Placement — hybridbank-cloud"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: cluster.open-cluster-management.io/v1beta1
+      kind: Placement
+      metadata:
+        name: hybridbank-cloud
+        namespace: openshift-gitops
+      spec:
+        clusterSets:
+          - "{{ clusterset_name }}"
+        predicates:
+          - requiredClusterSelector:
+              labelSelector:
+                matchExpressions:
+                  - key: cloud
+                    operator: In
+                    values:
+                      - azure
+                      - gcp
+                matchLabels:
+                  environment: demo
+
+# ===========================================================
+#  E) Create GitOpsCluster resource
+# ===========================================================
+
+- name: Create GitOpsCluster for ACM-ArgoCD integration
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: apps.open-cluster-management.io/v1beta1
+      kind: GitOpsCluster
+      metadata:
+        name: hybridbank-gitops
+        namespace: openshift-gitops
+      spec:
+        argoServer:
+          cluster: local-cluster
+          argoNamespace: openshift-gitops
+        placementRef:
+          kind: Placement
+          apiGroup: cluster.open-cluster-management.io
+          name: hybridbank-all-clusters
+
+# ===========================================================
+#  F) Apply ApplicationSet manifests from hybridbank/argocd/
+# ===========================================================
+
+- name: Apply ArgoCD manifests from hybridbank/argocd/
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    src: "{{ item }}"
+  loop:
+    - "{{ playbook_dir }}/../../hybridbank/argocd/clusterset-binding-gitops.yaml"
+    - "{{ playbook_dir }}/../../hybridbank/argocd/gitopscluster.yaml"
+    - "{{ playbook_dir }}/../../hybridbank/argocd/hybridbank-base-appset.yaml"
+    - "{{ playbook_dir }}/../../hybridbank/argocd/hybridbank-onprem-appset.yaml"
+    - "{{ playbook_dir }}/../../hybridbank/argocd/hybridbank-cloud-appset.yaml"
+    - "{{ playbook_dir }}/../../hybridbank/argocd/lifeboat-placement.yaml"
+  loop_control:
+    label: "{{ item | basename }}"
+
+- name: ArgoCD GitOps setup complete
+  ansible.builtin.debug:
+    msg: >-
+      ArgoCD GitOps deployment configured successfully.
+      ApplicationSets deployed: hybridbank-base, hybridbank-onprem, hybridbank-cloud.
+      Placements: hybridbank-all-clusters, hybridbank-onprem, hybridbank-cloud, hybridbank-lifeboat.

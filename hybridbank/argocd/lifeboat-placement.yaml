@@ -1,0 +1,24 @@
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: hybridbank-lifeboat
+  namespace: openshift-gitops
+spec:
+  numberOfClusters: 1
+  clusterSets:
+    - hybrid-cloud-demo
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: cloud
+              operator: In
+              values:
+                - azure
+                - gcp
+          matchLabels:
+            environment: demo
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+      tolerationSeconds: 30

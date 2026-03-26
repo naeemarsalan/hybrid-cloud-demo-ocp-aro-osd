@@ -1,0 +1,78 @@
+---
+- name: "{{ managed_host }} — Set cluster vars"
+  ansible.builtin.set_fact:
+    _cluster_name: "{{ hostvars[managed_host].cluster_name }}"
+    _cluster_kubeconfig: "{{ hostvars[managed_host].kubeconfig }}"
+    _cluster_cloud: "{{ hostvars[managed_host].cloud }}"
+    _cluster_data_zone: "{{ hostvars[managed_host].data_zone }}"
+
+- name: "{{ managed_host }} — Create ManagedCluster resource"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: cluster.open-cluster-management.io/v1
+      kind: ManagedCluster
+      metadata:
+        name: "{{ _cluster_name }}"
+        labels:
+          cloud: "{{ _cluster_cloud }}"
+          environment: demo
+          vendor: OpenShift
+          cluster.open-cluster-management.io/clusterset: "{{ clusterset_name }}"
+          data-zone: "{{ _cluster_data_zone }}"
+      spec:
+        hubAcceptsClient: true
+
+- name: "{{ managed_host }} — Create cluster namespace on hub"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ _cluster_name }}"
+
+- name: "{{ managed_host }} — Get API URL from managed cluster"
+  ansible.builtin.command:
+    cmd: oc --kubeconfig={{ _cluster_kubeconfig }} whoami --show-server
+  register: managed_api_url
+  changed_when: false
+
+- name: "{{ managed_host }} — Get token from managed cluster"
+  ansible.builtin.command:
+    cmd: oc --kubeconfig={{ _cluster_kubeconfig }} whoami -t
+  register: managed_token
+  changed_when: false
+
+- name: "{{ managed_host }} — Create auto-import-secret"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: auto-import-secret
+        namespace: "{{ _cluster_name }}"
+      type: Opaque
+      stringData:
+        autoImportRetry: "5"
+        token: "{{ managed_token.stdout }}"
+        server: "{{ managed_api_url.stdout }}"
+
+- name: "{{ managed_host }} — Wait for ManagedCluster Available"
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_kubeconfig }}"
+    api_version: cluster.open-cluster-management.io/v1
+    kind: ManagedCluster
+    name: "{{ _cluster_name }}"
+  register: mc_status
+  until: >-
+    mc_status.resources | length > 0 and
+    mc_status.resources[0].status.conditions | default([]) |
+    selectattr('type', 'equalto', 'ManagedClusterConditionAvailable') |
+    selectattr('status', 'equalto', 'True') | list | length > 0
+  retries: 60
+  delay: 10
