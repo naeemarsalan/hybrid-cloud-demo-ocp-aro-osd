@@ -29,6 +29,7 @@ ansible/inventory/host_vars/*-secrets.yml
 terraform/.terraform/
 terraform/**/.terraform/
 *.tfstate
+*.tfstate.*
 *.tfstate.backup
 terraform.tfvars
 .terraform.lock.hcl
